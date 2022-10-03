@@ -1,0 +1,1 @@
+test ReactComponent [main=User]: {User,Component,Server};
