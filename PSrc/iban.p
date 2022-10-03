@@ -2,9 +2,10 @@ type InputMessage = (id: int, maybeValid: bool);
 type ValidationResult = (id: int, valid: bool);
 type ValidationRequest = (comp: machine, id: int);
 event eInput: InputMessage;
+event eDone: int;
 event eValidationRequest: ValidationRequest;
 event eValidationResult: ValidationResult;
-event eValidationError;
+event eValidationError: int;
 
 machine User {
   var component: Component;
@@ -45,41 +46,70 @@ machine Component {
   state Waiting {
     on eInput do (input: InputMessage) {
       if (input.maybeValid) {
-        send server, eValidationRequest, (comp = this, id = input.id);
+        ServerValidate(input);
         goto Validating;
       }
     }
   }
   state Validating {
     on eValidationResult do (result: ValidationResult) {
+      if (result.id != currentInput.id) {
+        return;
+      }
+      announce eDone, result.id;
       if (result.valid) {
         goto Valid;
       } else {
         goto Invalid;
       }
     }
-    on eValidationError do {
+    on eValidationError do (id: int) {
+      announce eDone, id; 
       goto WaitingManualBic;
     }
-    on eInput do {
-      goto Waiting;
+    on eInput do (input: InputMessage) {
+      if (input.maybeValid) {
+        ServerValidate(input);
+      }
     }
   }
   state Valid {
-    ignore eInput;
+    on eInput do HandleInput;
   }
   state Invalid {
-    ignore eInput;
+    on eInput do HandleInput;
   }
   state WaitingManualBic {
     on eInput do (input: InputMessage) {
       if (input.maybeValid) {
+        announce eDone, input.id;
         goto LocalValidationSuccess;
       }
     }
   }
   state LocalValidationSuccess {
-    ignore eInput;
+    on eInput do (input: InputMessage) {
+      if (input.maybeValid) {
+         announce eDone, input.id;
+      } else {
+        goto WaitingManualBic;
+      }
+    }
+  }
+
+  fun ServerValidate(input: InputMessage) {
+    currentInput = input;
+    send server, eValidationRequest, (comp = this, id = input.id);
+  }
+
+  fun HandleInput(input: InputMessage) {
+    if (input.maybeValid) {
+      ServerValidate(input);
+      goto Validating;
+    } else {
+      currentInput = input;
+      goto Waiting;
+    }
   }
 }
 
@@ -93,7 +123,7 @@ machine Server {
           send req.comp, eValidationResult, (id = req.id, valid = false);
         }
       } else {
-        send req.comp, eValidationError;
+        send req.comp, eValidationError, req.id;
       }
     }
   }
